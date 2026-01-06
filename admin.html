@@ -10,7 +10,7 @@
 <body class="bg-gray-900 text-white p-5 font-sans">
 
     <div class="max-w-4xl mx-auto">
-        <h1 class="text-3xl font-bold text-yellow-400 mb-5">🎓 KBC Host Control (v2)</h1>
+        <h1 class="text-3xl font-bold text-yellow-400 mb-5">🎓 KBC Host Control (Master)</h1>
         
         <div id="login-panel" class="mb-5">
             <input type="password" id="host-pwd" placeholder="Host Password" class="p-2 text-black rounded">
@@ -38,9 +38,13 @@
 
             <div class="bg-gray-800 p-4 rounded shadow grid grid-cols-2 gap-4">
                 <button onclick="resetGame()" class="bg-red-600 hover:bg-red-700 p-4 rounded font-bold">🔁 Reset Game</button>
-                <button onclick="setNextQuestion()" class="bg-green-600 hover:bg-green-700 p-4 rounded font-bold text-xl">➡️ NEXT Question</button>
+                <button id="btn-next" onclick="setNextQuestion()" class="bg-green-600 hover:bg-green-700 p-4 rounded font-bold text-xl">➡️ NEXT Question</button>
                 <button onclick="showLeaderboard()" class="bg-purple-600 hover:bg-purple-700 p-4 rounded font-bold">🏆 Show Leaderboard</button>
                 <button onclick="playMusic()" class="bg-yellow-600 hover:bg-yellow-700 p-4 rounded font-bold">🎵 Sound</button>
+            </div>
+
+            <div id="game-over-msg" class="hidden bg-yellow-600 p-4 rounded text-center font-bold text-2xl border-2 border-yellow-400">
+                🎉 GAME OVER! FINAL RESULTS SENT 🎉
             </div>
 
             <div id="admin-leaderboard-panel" class="hidden bg-purple-900 p-4 rounded border-2 border-purple-500">
@@ -49,7 +53,6 @@
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
                 <div class="bg-gray-800 p-4 rounded shadow border-2 border-blue-900">
                     <h2 class="text-xl mb-4 font-bold text-blue-400">Add New Question</h2>
                     <input type="text" id="q-text" placeholder="Question Text" class="w-full p-2 mb-2 text-black rounded">
@@ -70,9 +73,7 @@
 
                 <div class="bg-gray-800 p-4 rounded shadow">
                     <h2 class="text-xl mb-4 font-bold text-gray-300">Question Bank</h2>
-                    <div id="db-questions-list" class="space-y-2 h-64 overflow-y-auto pr-2">
-                        <p class="text-gray-500">Loading questions...</p>
-                    </div>
+                    <div id="db-questions-list" class="space-y-2 h-64 overflow-y-auto pr-2"></div>
                 </div>
             </div>
             
@@ -84,7 +85,6 @@
 
     <script>
         const SUPABASE_URL = "https://ndkwlfyqbbkohhccsijm.supabase.co";
-        // ⚠️ PASTE YOUR "ey..." KEY HERE AGAIN:
         const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ka3dsZnlxYmJrb2hoY2NzaWptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MDc1OTcsImV4cCI6MjA4MzI4MzU5N30.r5vOKPTc65gyoesWuiiT_slt2ldlEX6K0D2bbdS1nZI"; 
 
         const { createClient } = supabase;
@@ -93,13 +93,14 @@
 
     <script>
         const HOST_PASSWORD = "123"; 
+        let currentQIndex = 0;
 
         function checkPwd() {
             if(document.getElementById('host-pwd').value === HOST_PASSWORD) {
                 document.getElementById('login-panel').classList.add('hidden');
                 document.getElementById('admin-panel').classList.remove('hidden');
                 generateQR();
-                refreshData(); // Load questions immediately
+                refreshData();
             } else { alert("Wrong Password"); }
         }
 
@@ -107,7 +108,6 @@
             let url = window.location.href.replace('admin.html', '').replace(/admin\/?$/, '');
             if(!url.endsWith('/')) url += '/';
             document.getElementById("player-link-text").innerText = url;
-            document.getElementById("qrcode").innerHTML = "";
             new QRCode(document.getElementById("qrcode"), { text: url, width: 100, height: 100 });
         }
 
@@ -118,8 +118,6 @@
             fetchQuestionList();
         }
 
-        // --- 1. Question Management (View & Delete) ---
-
         async function updateQuestionCount() {
             const { count } = await _supabase.from('questions').select('*', { count: 'exact', head: true });
             document.getElementById('q-count').innerText = (count || 0);
@@ -129,24 +127,22 @@
             const { data: questions } = await _supabase.from('questions').select('*').order('id', { ascending: true });
             const listContainer = document.getElementById('db-questions-list');
             listContainer.innerHTML = "";
-
-            if(!questions || questions.length === 0) {
-                listContainer.innerHTML = "<p class='text-gray-500'>No questions found.</p>";
-                return;
+            
+            if(questions) {
+                questions.forEach((q, idx) => {
+                    const isActive = (idx === currentQIndex - 1); 
+                    const activeClass = isActive ? "border-2 border-green-500" : "";
+                    listContainer.innerHTML += `
+                        <div class="bg-gray-700 p-3 rounded flex justify-between items-center text-sm ${activeClass}">
+                            <div class="truncate mr-2">
+                                <span class="font-bold text-yellow-400">Q${idx+1}:</span> ${q.question_text}
+                                <br><span class="text-xs text-gray-400">Ans: ${q.correct_option}</span>
+                            </div>
+                            <button onclick="deleteQuestion(${q.id})" class="bg-red-900 hover:bg-red-700 text-red-200 px-2 py-1 rounded text-xs">Del</button>
+                        </div>
+                    `;
+                });
             }
-
-            questions.forEach((q, idx) => {
-                const div = document.createElement('div');
-                div.className = "bg-gray-700 p-3 rounded flex justify-between items-center text-sm";
-                div.innerHTML = `
-                    <div class="truncate mr-2">
-                        <span class="font-bold text-yellow-400">Q${idx+1}:</span> ${q.question_text}
-                        <br><span class="text-xs text-gray-400">Ans: ${q.correct_option}</span>
-                    </div>
-                    <button onclick="deleteQuestion(${q.id})" class="bg-red-900 hover:bg-red-700 text-red-200 px-2 py-1 rounded text-xs">Del</button>
-                `;
-                listContainer.appendChild(div);
-            });
         }
 
         async function deleteQuestion(id) {
@@ -164,39 +160,41 @@
                 option_d: document.getElementById('opt-d').value,
                 correct_option: document.getElementById('correct-opt').value
             };
-
             if(!q.question_text) return alert("Enter text");
             
             const { error } = await _supabase.from('questions').insert([q]);
             if(error) alert(error.message);
             else { 
                 log("Saved!");
-                // Clear inputs
                 document.getElementById('q-text').value = "";
                 refreshData(); 
             }
         }
 
-        // --- 2. Game Logic & Leaderboard ---
-
         async function resetGame() {
             if(!confirm("RESET EVERYTHING?")) return;
             await _supabase.from('players').delete().neq('score', -1); 
             await _supabase.from('game_state').update({ status: 'waiting', current_question_id: null }).eq('id', 1);
+            currentQIndex = 0;
+            document.getElementById('game-over-msg').classList.add('hidden');
+            document.getElementById('btn-next').innerText = "➡️ NEXT Question";
             log("Game Reset.");
-            document.getElementById('admin-leaderboard-panel').classList.add('hidden');
+            refreshData();
         }
-
-        let currentQIndex = 0;
 
         async function setNextQuestion() {
             const { data: questions } = await _supabase.from('questions').select('*').order('id', { ascending: true });
-            if (!questions || questions.length === 0) return alert("No questions!");
             
-            if (currentQIndex >= questions.length) currentQIndex = 0; 
-            const nextQ = questions[currentQIndex];
+            if (!questions || questions.length === 0) return alert("No questions!");
 
-            // Activate Question
+            // End Game Check
+            if (currentQIndex >= questions.length) {
+                finishGame();
+                return;
+            }
+
+            const nextQ = questions[currentQIndex];
+            
             await _supabase.from('game_state').update({ 
                 status: 'active', 
                 current_question_id: nextQ.id, 
@@ -204,27 +202,41 @@
             }).eq('id', 1);
 
             currentQIndex++;
-            log(`Q${currentQIndex} LIVE!`);
+            
+            const btnText = (currentQIndex === questions.length) ? "🏁 FINISH GAME" : "➡️ NEXT Question";
+            document.getElementById('btn-next').innerText = btnText;
+            
+            log(`Q${currentQIndex} is LIVE!`);
             document.getElementById('admin-leaderboard-panel').classList.add('hidden');
+            refreshData(); 
+        }
+
+        async function finishGame() {
+            await _supabase.from('game_state').update({ status: 'finished' }).eq('id', 1);
+            document.getElementById('game-over-msg').classList.remove('hidden');
+            document.getElementById('btn-next').innerText = "✅ Game Ended";
+            log("Game Over. Final Results Sent.");
+            showLeaderboard();
         }
 
         async function showLeaderboard() {
-            // 1. Update DB so PLAYERS see it
-            await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
-            
-            // 2. Fetch locally so ADMIN sees it
+            if(document.getElementById('btn-next').innerText !== "✅ Game Ended") {
+                 await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
+            }
             document.getElementById('admin-leaderboard-panel').classList.remove('hidden');
+            
+            // Tie-Breaker Sort (Score DESC, Time ASC)
             const { data: players } = await _supabase.from('players').select('*')
                 .order('score', { ascending: false })
-                .order('last_answer_time', { ascending: true, nullsFirst: false }) // Tie-breaker
+                .order('last_answer_time', { ascending: true, nullsFirst: false }) 
                 .limit(5);
 
             const list = document.getElementById('admin-lb-list');
             list.innerHTML = "";
             players.forEach((p, i) => {
-                list.innerHTML += `<div class="flex justify-between border-b border-purple-600 py-1"><span>#${i+1} ${p.name}</span> <span class="font-bold">${p.score}</span></div>`;
+                const medal = ["🥇","🥈","🥉"][i] || `#${i+1}`;
+                list.innerHTML += `<div class="flex justify-between border-b border-purple-600 py-2 text-lg"><span>${medal} ${p.name}</span> <span class="font-bold">${p.score}</span></div>`;
             });
-            log("Leaderboard Live for Everyone!");
         }
 
         function playMusic() { document.getElementById('sound-suspense').play(); }

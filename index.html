@@ -13,6 +13,11 @@
         .correct-anim { animation: flashGreen 1s infinite; background-color: #059669 !important; border-color: #34d399 !important; }
         .wrong-anim { background-color: #991b1b !important; border-color: #f87171 !important; opacity: 0.7; }
         @keyframes flashGreen { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+        
+        /* Gold Silver Bronze Styles */
+        .rank-0 { background: linear-gradient(45deg, #FFD700, #FDB931); border-color: #FFF; color: black; text-shadow: none; transform: scale(1.05); }
+        .rank-1 { background: linear-gradient(45deg, #E0E0E0, #BDBDBD); border-color: #FFF; color: black; text-shadow: none; }
+        .rank-2 { background: linear-gradient(45deg, #CD7F32, #A0522D); border-color: #FFF; color: white; }
     </style>
 </head>
 <body class="kbc-gradient text-white h-screen flex flex-col items-center justify-center font-sans overflow-hidden p-4">
@@ -45,15 +50,15 @@
         <div id="result-feedback" class="hidden mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2"></div>
     </div>
 
-    <div id="screen-leaderboard" class="hidden w-full max-w-md text-center">
-        <h2 class="text-3xl font-bold text-yellow-400 mb-6">🏆 LEADERBOARD</h2>
+    <div id="screen-leaderboard" class="hidden w-full max-w-md text-center h-full flex flex-col justify-center">
+        <h2 id="lb-title" class="text-3xl font-bold text-yellow-400 mb-6">🏆 LEADERBOARD</h2>
         <div id="leaderboard-list" class="space-y-3 w-full"></div>
-        <p class="mt-8 text-gray-500 text-sm animate-pulse">Waiting for next question...</p>
+        <p id="lb-wait-msg" class="mt-8 text-gray-500 text-sm animate-pulse">Waiting for next question...</p>
     </div>
 
     <script>
         const SUPABASE_URL = "https://ndkwlfyqbbkohhccsijm.supabase.co";
-        // ⚠️ PASTE YOUR "ey..." KEY HERE AGAIN:
+        
         const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ka3dsZnlxYmJrb2hoY2NzaWptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MDc1OTcsImV4cCI6MjA4MzI4MzU5N30.r5vOKPTc65gyoesWuiiT_slt2ldlEX6K0D2bbdS1nZI"; 
 
         const { createClient } = supabase;
@@ -76,7 +81,7 @@
             showScreen('screen-waiting');
             listenToGame();
             
-            // Check if game is already active
+            // Initial Check
             const { data: state } = await _supabase.from('game_state').select('*').eq('id', 1).single();
             if(state) handleGameState(state);
         }
@@ -85,12 +90,11 @@
             if(hasAnswered) return;
             hasAnswered = true;
 
-            // 1. UI Feedback (Feature 3)
             const isCorrect = (selectedOption === currentQData.correct_option);
             const feedbackBox = document.getElementById('result-feedback');
             const btn = document.getElementById('btn-' + selectedOption);
 
-            // Disable all buttons
+            // Lock UI
             ['A','B','C','D'].forEach(opt => document.getElementById('btn-'+opt).classList.add('opacity-50', 'pointer-events-none'));
 
             if (isCorrect) {
@@ -98,11 +102,10 @@
                 feedbackBox.innerHTML = "✅ CORRECT! <br> <span class='text-sm'>+10 Points</span>";
                 feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-green-900 border-green-500 text-white";
                 
-                // 2. Database Update with Tie-Breaker (Feature 4)
                 const { data: player } = await _supabase.from('players').select('score').eq('id', myId).single();
                 const newScore = (player.score || 0) + 10;
                 
-                // Update Score AND Timestamp
+                // Save Score + Time (Tie-Breaker)
                 await _supabase.from('players').update({ 
                     score: newScore,
                     last_answer_time: new Date().toISOString() 
@@ -113,7 +116,6 @@
                 feedbackBox.innerHTML = `❌ WRONG! <br> <span class='text-sm text-gray-300'>Answer was ${currentQData.correct_option}</span>`;
                 feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-red-900 border-red-500 text-white";
             }
-            
             feedbackBox.classList.remove('hidden');
         }
 
@@ -126,18 +128,16 @@
 
         async function handleGameState(state) {
             if (state.status === 'active') {
-                if (currentQData && currentQData.id === state.current_question_id) return; // Don't reload same Q
+                if (currentQData && currentQData.id === state.current_question_id) return;
 
-                // Fetch Question
                 const { data: q } = await _supabase.from('questions').select('*').eq('id', state.current_question_id).single();
                 currentQData = q;
                 hasAnswered = false;
 
-                // Reset UI
                 ['A','B','C','D'].forEach(opt => {
                     document.getElementById('opt-'+opt).innerText = q['option_'+opt.toLowerCase()];
                     const btn = document.getElementById('btn-'+opt);
-                    btn.className = "option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-900 flex items-center"; // Reset classes
+                    btn.className = "option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-900 flex items-center";
                 });
                 document.getElementById('q-text-display').innerText = q.question_text;
                 document.getElementById('result-feedback').classList.add('hidden');
@@ -145,16 +145,25 @@
                 showScreen('screen-question');
             } 
             else if (state.status === 'leaderboard') {
-                updateLeaderboard();
+                document.getElementById('lb-title').innerText = "🏆 LEADERBOARD";
+                document.getElementById('lb-wait-msg').classList.remove('hidden');
+                updateLeaderboard(false);
                 showScreen('screen-leaderboard');
-            } 
+            }
+            else if (state.status === 'finished') {
+                // GAME OVER SCREEN
+                document.getElementById('lb-title').innerText = "🎉 FINAL WINNERS 🎉";
+                document.getElementById('lb-wait-msg').classList.add('hidden');
+                updateLeaderboard(true); 
+                showScreen('screen-leaderboard');
+            }
             else if (state.status === 'waiting') {
                 showScreen('screen-waiting');
             }
         }
 
-        async function updateLeaderboard() {
-            // Feature 4: Sort by Score (Desc) THEN Time (Asc)
+        async function updateLeaderboard(isFinal) {
+            // Sort: Score DESC, Time ASC
             const { data: players } = await _supabase.from('players').select('*')
                 .order('score', { ascending: false })
                 .order('last_answer_time', { ascending: true, nullsFirst: false }) 
@@ -164,17 +173,31 @@
             list.innerHTML = "";
             
             players.forEach((p, index) => {
-                const colors = ["bg-yellow-600 border-yellow-400", "bg-gray-500 border-gray-300", "bg-orange-700 border-orange-500", "bg-gray-800 border-gray-700", "bg-gray-800 border-gray-700"];
+                let cardClass = "bg-gray-800 border-gray-700";
+                
+                if(isFinal) {
+                    if (index === 0) cardClass = "rank-0 shadow-yellow-500/50";
+                    else if (index === 1) cardClass = "rank-1";
+                    else if (index === 2) cardClass = "rank-2";
+                }
+
+                const medal = ["🥇","🥈","🥉","4️⃣","5️⃣"][index] || `#${index+1}`;
+
                 list.innerHTML += `
-                    <div class="${colors[index] || 'bg-gray-800'} border-2 p-3 rounded-lg flex justify-between items-center text-white shadow-lg">
-                        <span class="font-bold text-xl">#${index+1} ${p.name}</span>
+                    <div class="${cardClass} border-2 p-3 rounded-lg flex justify-between items-center shadow-lg transition-all duration-500">
+                        <span class="font-bold text-xl flex items-center gap-2">
+                            <span class="text-2xl">${medal}</span> ${p.name}
+                        </span>
                         <div class="text-right">
-                            <span class="block font-mono text-xl leading-none">${p.score}</span>
-                            <span class="text-[10px] text-gray-300">pts</span>
+                            <span class="block font-mono text-xl leading-none font-bold">${p.score}</span>
                         </div>
                     </div>
                 `;
             });
+            
+            if(isFinal) {
+                list.innerHTML += `<div class="mt-6 text-gray-400 text-sm">Thanks for playing!</div>`;
+            }
         }
 
         function showScreen(id) {
