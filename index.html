@@ -10,6 +10,8 @@
         .kbc-gradient { background: radial-gradient(circle, #1e1e2f 0%, #000000 100%); }
         .option-btn { transition: transform 0.1s; }
         .option-btn:active { transform: scale(0.95); }
+        /* Prevent double-tap zoom on mobile */
+        button { touch-action: manipulation; }
     </style>
 </head>
 <body class="kbc-gradient text-white h-screen flex flex-col items-center justify-center font-sans overflow-hidden">
@@ -18,31 +20,35 @@
         <h1 class="text-4xl font-bold text-yellow-500 mb-8">KBC QUIZ</h1>
         <input type="text" id="player-name" placeholder="Enter Your Name" class="w-full p-4 rounded text-black text-xl mb-4 text-center">
         <button onclick="joinGame()" class="w-full bg-blue-600 py-4 rounded-full text-xl font-bold shadow-lg hover:bg-blue-500">JOIN GAME</button>
+        <p id="login-error" class="text-red-500 mt-2"></p>
     </div>
 
-    <div id="screen-waiting" class="hidden text-center animate-pulse">
-        <h2 class="text-2xl">You are in!</h2>
+    <div id="screen-waiting" class="hidden text-center w-full max-w-md p-6">
+        <h2 class="text-2xl animate-pulse font-bold text-green-400">You are in!</h2>
         <p class="text-gray-400 mt-2">Waiting for the host...</p>
-        <div id="waiting-msg" class="mt-4 text-yellow-400 text-lg"></div>
+        <div id="waiting-msg" class="mt-8 text-yellow-400 text-lg border-t border-gray-700 pt-4"></div>
     </div>
 
-    <div id="screen-question" class="hidden w-full max-w-2xl p-4">
+    <div id="screen-question" class="hidden w-full max-w-2xl p-4 flex flex-col h-full justify-center">
         <div id="timer-bar" class="h-2 bg-yellow-500 w-full mb-4 transition-all duration-[30s]"></div>
-        <div id="q-text-display" class="bg-blue-900 border-2 border-yellow-500 p-6 rounded-xl text-xl text-center mb-6 shadow-xl">
+        
+        <div id="q-text-display" class="bg-blue-900 border-2 border-yellow-500 p-6 rounded-xl text-xl md:text-2xl text-center mb-6 shadow-xl font-bold">
             Loading Question...
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button onclick="submitAnswer('A')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">A:</span> <span id="opt-a-display"></span></button>
-            <button onclick="submitAnswer('B')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">B:</span> <span id="opt-b-display"></span></button>
-            <button onclick="submitAnswer('C')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">C:</span> <span id="opt-c-display"></span></button>
-            <button onclick="submitAnswer('D')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">D:</span> <span id="opt-d-display"></span></button>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+            <button onclick="submitAnswer('A')" class="option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex items-center"><span class="text-yellow-500 font-bold mr-3 text-xl">A:</span> <span id="opt-a-display" class="text-lg"></span></button>
+            <button onclick="submitAnswer('B')" class="option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex items-center"><span class="text-yellow-500 font-bold mr-3 text-xl">B:</span> <span id="opt-b-display" class="text-lg"></span></button>
+            <button onclick="submitAnswer('C')" class="option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex items-center"><span class="text-yellow-500 font-bold mr-3 text-xl">C:</span> <span id="opt-c-display" class="text-lg"></span></button>
+            <button onclick="submitAnswer('D')" class="option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex items-center"><span class="text-yellow-500 font-bold mr-3 text-xl">D:</span> <span id="opt-d-display" class="text-lg"></span></button>
         </div>
     </div>
 
     <div id="screen-leaderboard" class="hidden w-full max-w-md p-4 text-center">
-        <h2 class="text-3xl font-bold text-yellow-400 mb-6">🏆 LEADERBOARD</h2>
-        <div id="leaderboard-list" class="space-y-3">
+        <h2 class="text-3xl font-bold text-yellow-400 mb-6">🏆 TOP SCORERS</h2>
+        <div id="leaderboard-list" class="space-y-3 w-full">
             </div>
+        <p class="mt-8 text-gray-500 text-sm animate-pulse">Waiting for next question...</p>
     </div>
 
     <script src="config.js"></script>
@@ -58,29 +64,45 @@
 
             const { data, error } = await _supabase.from('players').insert([{ name: name }]).select();
             
-            if(error) { alert("Error joining"); console.error(error); return; }
+            if(error) { 
+                console.error(error);
+                document.getElementById('login-error').innerText = "Could not join. Try again.";
+                return; 
+            }
             
             myId = data[0].id;
-            localStorage.setItem('kbc_player_id', myId); // Save ID for refresh
             
             showScreen('screen-waiting');
+            
+            // 1. Start Listening for FUTURE updates
             listenToGame();
+            
+            // 2. IMMEDIATE CHECK: Is a question already live?
+            checkCurrentStatus();
+        }
+
+        async function checkCurrentStatus() {
+            // Fetch the current state from DB immediately
+            const { data: state } = await _supabase.from('game_state').select('*').eq('id', 1).single();
+            if(state) {
+                console.log("Initial State Loaded:", state);
+                handleGameState(state);
+            }
         }
 
         async function submitAnswer(selectedOption) {
-            // Lock UI
+            // Instant UI feedback
             showScreen('screen-waiting');
-            document.getElementById('waiting-msg').innerText = "Answer Submitted! Fingers crossed...";
+            document.getElementById('waiting-msg').innerHTML = `You answered <span class="text-white font-bold text-2xl">${selectedOption}</span><br>Fingers crossed! 🤞`;
 
-            // Check correctness (Client side check for speed, server validates securely in a real app)
             if(!currentQData) return;
 
+            // Simple Score Update
             if (selectedOption === currentQData.correct_option) {
-                // Correct! Increment Score
-                // We use RPC normally, but here simple update:
-                // Fetch current score first (Atomic increment is better, but this is Simple mode)
+                // Get current score
                 const { data: player } = await _supabase.from('players').select('score').eq('id', myId).single();
                 const newScore = (player.score || 0) + 10;
+                // Update score
                 await _supabase.from('players').update({ score: newScore }).eq('id', myId);
             }
         }
@@ -88,7 +110,6 @@
         // --- Game Loop (Realtime) ---
 
         function listenToGame() {
-            // Listen to 'game_state' updates
             _supabase.channel('custom-all-channel')
             .on(
                 'postgres_changes',
@@ -101,14 +122,20 @@
         }
 
         async function handleGameState(state) {
-            console.log("Game State Update:", state);
+            console.log("Handling State:", state.status);
 
             if (state.status === 'active') {
-                // Fetch the question details
-                const { data: q } = await _supabase.from('questions').select('*').eq('id', state.current_question_id).single();
+                // 1. Fetch Question Data
+                const { data: q, error } = await _supabase.from('questions').select('*').eq('id', state.current_question_id).single();
+                
+                if (error || !q) {
+                    console.error("Error fetching question", error);
+                    return;
+                }
+                
                 currentQData = q;
                 
-                // Update UI
+                // 2. Update UI
                 document.getElementById('q-text-display').innerText = q.question_text;
                 document.getElementById('opt-a-display').innerText = q.option_a;
                 document.getElementById('opt-b-display').innerText = q.option_b;
@@ -118,7 +145,7 @@
                 showScreen('screen-question');
             } 
             else if (state.status === 'leaderboard') {
-                updateLeaderboard();
+                await updateLeaderboard();
                 showScreen('screen-leaderboard');
             } 
             else if (state.status === 'waiting') {
@@ -128,17 +155,20 @@
         }
 
         async function updateLeaderboard() {
-            // Fetch top 5
             const { data: players } = await _supabase.from('players').select('*').order('score', { ascending: false }).limit(5);
             const list = document.getElementById('leaderboard-list');
             list.innerHTML = "";
             
+            if(!players) return;
+
             players.forEach((p, index) => {
-                const colors = ["bg-yellow-500", "bg-gray-400", "bg-orange-600", "bg-gray-700", "bg-gray-700"];
+                const colors = ["bg-yellow-600 border-yellow-400", "bg-gray-500 border-gray-300", "bg-orange-700 border-orange-500", "bg-gray-800 border-gray-700", "bg-gray-800 border-gray-700"];
+                const icons = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"];
+                
                 list.innerHTML += `
-                    <div class="${colors[index] || 'bg-gray-800'} p-3 rounded flex justify-between items-center text-white font-bold shadow">
-                        <span>#${index+1} ${p.name}</span>
-                        <span>${p.score} pts</span>
+                    <div class="${colors[index]} border-2 p-3 rounded-lg flex justify-between items-center text-white shadow-lg transform hover:scale-105 transition-transform">
+                        <span class="font-bold text-xl">${icons[index]} ${p.name}</span>
+                        <span class="font-mono text-xl">${p.score}</span>
                     </div>
                 `;
             });
