@@ -23,6 +23,7 @@
                 <div>
                     <h2 class="text-xl mb-2">Invite Players</h2>
                     <p class="text-sm text-gray-400">Scan to join the Game Screen</p>
+                    <p id="player-link-text" class="text-xs text-blue-300 mt-2 break-all"></p>
                 </div>
                 <div class="bg-white p-2 rounded">
                     <div id="qrcode"></div>
@@ -30,7 +31,7 @@
             </div>
 
             <div class="bg-gray-700 p-4 rounded text-center">
-                <span class="text-2xl font-bold text-green-400" id="q-count">Loading...</span>
+                <span class="text-2xl font-bold text-green-400" id="q-count">Checking Database...</span>
                 <p class="text-sm text-gray-300">Questions currently in Database</p>
             </div>
 
@@ -56,7 +57,7 @@
                     <option value="C">Answer: C</option>
                     <option value="D">Answer: D</option>
                 </select>
-                <button onclick="addQuestion()" class="bg-blue-600 hover:bg-blue-500 w-full py-2 rounded font-bold">➕ Save Question</button>
+                <button onclick="addQuestion()" class="bg-blue-600 hover:bg-blue-500 w-full py-2 rounded font-bold">➕ Save Question to Bank</button>
             </div>
             
             <div id="status-log" class="text-green-400 font-mono text-sm mt-4"></div>
@@ -79,32 +80,41 @@
         }
 
         function generateQR() {
-            // FIX: Removes 'admin.html' from the URL to get the player link
-            // Example: .../kbc_quiz/admin.html becomes .../kbc_quiz/
-            const cleanUrl = window.location.href.split('admin.html')[0]; 
-            console.log("Player URL:", cleanUrl);
-            new QRCode(document.getElementById("qrcode"), { text: cleanUrl, width: 100, height: 100 });
+            // FIX: Robustly remove 'admin' or 'admin.html' to get the root player URL
+            let url = window.location.href;
+            
+            // 1. Remove 'admin.html' if present
+            url = url.replace('admin.html', '');
+            
+            // 2. Remove 'admin' if present (e.g. at end of url)
+            // We use a regular expression to match 'admin' only at the end of the string
+            url = url.replace(/admin\/?$/, '');
+            
+            // 3. Ensure it ends in a slash so it loads index.html
+            if(!url.endsWith('/')) url += '/';
+
+            console.log("Player URL:", url);
+            
+            // Show the text so you can verify it
+            document.getElementById("player-link-text").innerText = url;
+            
+            // Generate QR
+            document.getElementById("qrcode").innerHTML = "";
+            new QRCode(document.getElementById("qrcode"), { text: url, width: 100, height: 100 });
         }
 
         function log(msg) { document.getElementById('status-log').innerText = msg; }
 
-        // --- Database Logic ---
-
         async function updateQuestionCount() {
-            // Check how many questions exist
             const { count } = await _supabase.from('questions').select('*', { count: 'exact', head: true });
             document.getElementById('q-count').innerText = (count || 0) + " Questions Ready";
         }
 
         async function resetGame() {
             if(!confirm("Are you sure? This deletes ALL players and resets the game.")) return;
-            
             await _supabase.from('players').delete().neq('score', -1); 
-            // We do NOT delete questions here so you don't lose your work.
-            // Reset game state
             await _supabase.from('game_state').update({ status: 'waiting', current_question_id: null }).eq('id', 1);
-            
-            log("Game Reset! Players cleared. Questions kept.");
+            log("Game Reset! Players cleared.");
             currentQIndex = 0;
         }
 
@@ -118,55 +128,47 @@
                 correct_option: document.getElementById('correct-opt').value
             };
 
-            // Basic Validation
             if(!q.question_text || !q.option_a) return alert("Fill in the question fields!");
 
             const { error } = await _supabase.from('questions').insert([q]);
             
-            if(error) {
-                alert("Error adding question");
-                console.error(error);
-            } else { 
-                log("Question Saved to Database!");
-                // Clear inputs
+            if(error) { alert("Error adding question"); } 
+            else { 
+                log("Question Saved! Add another or Click Next to Start.");
                 document.getElementById('q-text').value = "";
                 document.getElementById('opt-a').value = "";
                 document.getElementById('opt-b').value = "";
                 document.getElementById('opt-c').value = "";
                 document.getElementById('opt-d').value = "";
-                updateQuestionCount(); // Update the counter
+                updateQuestionCount(); 
             }
         }
 
         let currentQIndex = 0;
 
         async function setNextQuestion() {
-            // 1. Get all questions sorted by ID
+            // Get all questions
             const { data: questions } = await _supabase.from('questions').select('*').order('id', { ascending: true });
             
             if (!questions || questions.length === 0) return alert("No questions added yet!");
-            
-            // 2. Select the next one based on our local index
-            if (currentQIndex >= questions.length) {
-                return alert("No more questions! Game Over.");
-            }
+            if (currentQIndex >= questions.length) return alert("No more questions! Game Over.");
 
             const nextQ = questions[currentQIndex];
 
-            // 3. Push to Game State
+            // Push to Game State (This makes it live for players)
             await _supabase.from('game_state').update({ 
                 status: 'active', 
                 current_question_id: nextQ.id,
                 question_start_time: new Date().toISOString()
             }).eq('id', 1);
 
-            currentQIndex++; // Prepare for the next click
-            log(`Broadcasting Question ${currentQIndex} of ${questions.length}...`);
+            currentQIndex++;
+            log(`Question ${currentQIndex} is LIVE! Players can now see it.`);
         }
 
         async function showLeaderboard() {
             await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
-            log("Leaderboard Live!");
+            log("Leaderboard is visible to players.");
         }
 
         function playMusic() {
