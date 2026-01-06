@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Play KBC Quiz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        .kbc-gradient { background: radial-gradient(circle, #1e1e2f 0%, #000000 100%); }
+        .option-btn { transition: transform 0.1s; }
+        .option-btn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body class="kbc-gradient text-white h-screen flex flex-col items-center justify-center font-sans overflow-hidden">
+
+    <div id="screen-login" class="text-center w-full max-w-md p-6">
+        <h1 class="text-4xl font-bold text-yellow-500 mb-8">KBC QUIZ</h1>
+        <input type="text" id="player-name" placeholder="Enter Your Name" class="w-full p-4 rounded text-black text-xl mb-4 text-center">
+        <button onclick="joinGame()" class="w-full bg-blue-600 py-4 rounded-full text-xl font-bold shadow-lg hover:bg-blue-500">JOIN GAME</button>
+    </div>
+
+    <div id="screen-waiting" class="hidden text-center animate-pulse">
+        <h2 class="text-2xl">You are in!</h2>
+        <p class="text-gray-400 mt-2">Waiting for the host...</p>
+        <div id="waiting-msg" class="mt-4 text-yellow-400 text-lg"></div>
+    </div>
+
+    <div id="screen-question" class="hidden w-full max-w-2xl p-4">
+        <div id="timer-bar" class="h-2 bg-yellow-500 w-full mb-4 transition-all duration-[30s]"></div>
+        <div id="q-text-display" class="bg-blue-900 border-2 border-yellow-500 p-6 rounded-xl text-xl text-center mb-6 shadow-xl">
+            Loading Question...
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button onclick="submitAnswer('A')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">A:</span> <span id="opt-a-display"></span></button>
+            <button onclick="submitAnswer('B')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">B:</span> <span id="opt-b-display"></span></button>
+            <button onclick="submitAnswer('C')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">C:</span> <span id="opt-c-display"></span></button>
+            <button onclick="submitAnswer('D')" class="option-btn bg-gray-800 border border-gray-600 p-4 rounded-lg hover:bg-blue-800 flex"><span class="text-yellow-500 font-bold mr-2">D:</span> <span id="opt-d-display"></span></button>
+        </div>
+    </div>
+
+    <div id="screen-leaderboard" class="hidden w-full max-w-md p-4 text-center">
+        <h2 class="text-3xl font-bold text-yellow-400 mb-6">🏆 LEADERBOARD</h2>
+        <div id="leaderboard-list" class="space-y-3">
+            </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        let myId = null;
+        let currentQData = null;
+
+        // --- User Actions ---
+
+        async function joinGame() {
+            const name = document.getElementById('player-name').value;
+            if(!name) return alert("Name is required");
+
+            const { data, error } = await _supabase.from('players').insert([{ name: name }]).select();
+            
+            if(error) { alert("Error joining"); console.error(error); return; }
+            
+            myId = data[0].id;
+            localStorage.setItem('kbc_player_id', myId); // Save ID for refresh
+            
+            showScreen('screen-waiting');
+            listenToGame();
+        }
+
+        async function submitAnswer(selectedOption) {
+            // Lock UI
+            showScreen('screen-waiting');
+            document.getElementById('waiting-msg').innerText = "Answer Submitted! Fingers crossed...";
+
+            // Check correctness (Client side check for speed, server validates securely in a real app)
+            if(!currentQData) return;
+
+            if (selectedOption === currentQData.correct_option) {
+                // Correct! Increment Score
+                // We use RPC normally, but here simple update:
+                // Fetch current score first (Atomic increment is better, but this is Simple mode)
+                const { data: player } = await _supabase.from('players').select('score').eq('id', myId).single();
+                const newScore = (player.score || 0) + 10;
+                await _supabase.from('players').update({ score: newScore }).eq('id', myId);
+            }
+        }
+
+        // --- Game Loop (Realtime) ---
+
+        function listenToGame() {
+            // Listen to 'game_state' updates
+            _supabase.channel('custom-all-channel')
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'game_state' },
+                (payload) => {
+                    handleGameState(payload.new);
+                }
+            )
+            .subscribe();
+        }
+
+        async function handleGameState(state) {
+            console.log("Game State Update:", state);
+
+            if (state.status === 'active') {
+                // Fetch the question details
+                const { data: q } = await _supabase.from('questions').select('*').eq('id', state.current_question_id).single();
+                currentQData = q;
+                
+                // Update UI
+                document.getElementById('q-text-display').innerText = q.question_text;
+                document.getElementById('opt-a-display').innerText = q.option_a;
+                document.getElementById('opt-b-display').innerText = q.option_b;
+                document.getElementById('opt-c-display').innerText = q.option_c;
+                document.getElementById('opt-d-display').innerText = q.option_d;
+                
+                showScreen('screen-question');
+            } 
+            else if (state.status === 'leaderboard') {
+                updateLeaderboard();
+                showScreen('screen-leaderboard');
+            } 
+            else if (state.status === 'waiting') {
+                showScreen('screen-waiting');
+                document.getElementById('waiting-msg').innerText = "Get Ready for the next round...";
+            }
+        }
+
+        async function updateLeaderboard() {
+            // Fetch top 5
+            const { data: players } = await _supabase.from('players').select('*').order('score', { ascending: false }).limit(5);
+            const list = document.getElementById('leaderboard-list');
+            list.innerHTML = "";
+            
+            players.forEach((p, index) => {
+                const colors = ["bg-yellow-500", "bg-gray-400", "bg-orange-600", "bg-gray-700", "bg-gray-700"];
+                list.innerHTML += `
+                    <div class="${colors[index] || 'bg-gray-800'} p-3 rounded flex justify-between items-center text-white font-bold shadow">
+                        <span>#${index+1} ${p.name}</span>
+                        <span>${p.score} pts</span>
+                    </div>
+                `;
+            });
+        }
+
+        function showScreen(id) {
+            ['screen-login', 'screen-waiting', 'screen-question', 'screen-leaderboard'].forEach(s => {
+                document.getElementById(s).classList.add('hidden');
+            });
+            document.getElementById(id).classList.remove('hidden');
+        }
+
+    </script>
+</body>
+</html>
