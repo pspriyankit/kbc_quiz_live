@@ -19,21 +19,30 @@
 
         <div id="admin-panel" class="hidden space-y-6">
             
-            <div class="bg-gray-800 p-4 rounded shadow">
-                <h2 class="text-xl mb-2">Invite Players</h2>
-                <div id="qrcode" class="bg-white p-2 w-32 h-32"></div>
-                <p class="text-sm mt-2 text-gray-400">Scan to join</p>
+            <div class="bg-gray-800 p-4 rounded shadow flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl mb-2">Invite Players</h2>
+                    <p class="text-sm text-gray-400">Scan to join the Game Screen</p>
+                </div>
+                <div class="bg-white p-2 rounded">
+                    <div id="qrcode"></div>
+                </div>
+            </div>
+
+            <div class="bg-gray-700 p-4 rounded text-center">
+                <span class="text-2xl font-bold text-green-400" id="q-count">Loading...</span>
+                <p class="text-sm text-gray-300">Questions currently in Database</p>
             </div>
 
             <div class="bg-gray-800 p-4 rounded shadow grid grid-cols-2 gap-4">
-                <button onclick="resetGame()" class="bg-red-600 hover:bg-red-700 p-4 rounded font-bold">🔁 Reset Game / Clear Players</button>
-                <button onclick="setNextQuestion()" class="bg-green-600 hover:bg-green-700 p-4 rounded font-bold">➡️ Next Question</button>
+                <button onclick="resetGame()" class="bg-red-600 hover:bg-red-700 p-4 rounded font-bold">🔁 Reset Game (Clear All)</button>
+                <button onclick="setNextQuestion()" class="bg-green-600 hover:bg-green-700 p-4 rounded font-bold text-xl">➡️ START / NEXT Question</button>
                 <button onclick="showLeaderboard()" class="bg-purple-600 hover:bg-purple-700 p-4 rounded font-bold">🏆 Show Leaderboard</button>
-                <button onclick="playMusic('suspense')" class="bg-yellow-600 hover:bg-yellow-700 p-4 rounded font-bold">🎵 Play Suspense Sound</button>
+                <button onclick="playMusic()" class="bg-yellow-600 hover:bg-yellow-700 p-4 rounded font-bold">🎵 Play Sound</button>
             </div>
 
-            <div class="bg-gray-800 p-4 rounded shadow">
-                <h2 class="text-xl mb-4">Add New Question</h2>
+            <div class="bg-gray-800 p-4 rounded shadow border-2 border-blue-900">
+                <h2 class="text-xl mb-4 font-bold text-blue-400">Add Question to Bank</h2>
                 <input type="text" id="q-text" placeholder="Question Text" class="w-full p-2 mb-2 text-black rounded">
                 <div class="grid grid-cols-2 gap-2 mb-2">
                     <input type="text" id="opt-a" placeholder="Option A" class="p-2 text-black rounded">
@@ -47,10 +56,10 @@
                     <option value="C">Answer: C</option>
                     <option value="D">Answer: D</option>
                 </select>
-                <button onclick="addQuestion()" class="bg-blue-500 w-full py-2 rounded font-bold">Add to Quiz</button>
+                <button onclick="addQuestion()" class="bg-blue-600 hover:bg-blue-500 w-full py-2 rounded font-bold">➕ Save Question</button>
             </div>
             
-            <div id="status-log" class="text-green-400 font-mono text-sm"></div>
+            <div id="status-log" class="text-green-400 font-mono text-sm mt-4"></div>
         </div>
     </div>
 
@@ -58,32 +67,45 @@
 
     <script src="config.js"></script>
     <script>
-        // --- 1. Security & Setup ---
-        const HOST_PASSWORD = "123"; // CHANGE THIS
+        const HOST_PASSWORD = "123"; 
 
         function checkPwd() {
             if(document.getElementById('host-pwd').value === HOST_PASSWORD) {
                 document.getElementById('login-panel').classList.add('hidden');
                 document.getElementById('admin-panel').classList.remove('hidden');
                 generateQR();
+                updateQuestionCount();
             } else { alert("Wrong Password"); }
         }
 
         function generateQR() {
-            // Generates QR for index.html (assumes same folder structure)
-            const url = window.location.href.replace('admin.html', 'index.html');
-            new QRCode(document.getElementById("qrcode"), { text: url, width: 100, height: 100 });
+            // FIX: Removes 'admin.html' from the URL to get the player link
+            // Example: .../kbc_quiz/admin.html becomes .../kbc_quiz/
+            const cleanUrl = window.location.href.split('admin.html')[0]; 
+            console.log("Player URL:", cleanUrl);
+            new QRCode(document.getElementById("qrcode"), { text: cleanUrl, width: 100, height: 100 });
         }
 
         function log(msg) { document.getElementById('status-log').innerText = msg; }
 
-        // --- 2. Game Logic ---
+        // --- Database Logic ---
+
+        async function updateQuestionCount() {
+            // Check how many questions exist
+            const { count } = await _supabase.from('questions').select('*', { count: 'exact', head: true });
+            document.getElementById('q-count').innerText = (count || 0) + " Questions Ready";
+        }
 
         async function resetGame() {
-            // Reset players and state
-            await _supabase.from('players').delete().neq('score', -1); // Delete all
+            if(!confirm("Are you sure? This deletes ALL players and resets the game.")) return;
+            
+            await _supabase.from('players').delete().neq('score', -1); 
+            // We do NOT delete questions here so you don't lose your work.
+            // Reset game state
             await _supabase.from('game_state').update({ status: 'waiting', current_question_id: null }).eq('id', 1);
-            log("Game Reset. Waiting for players...");
+            
+            log("Game Reset! Players cleared. Questions kept.");
+            currentQIndex = 0;
         }
 
         async function addQuestion() {
@@ -95,50 +117,61 @@
                 option_d: document.getElementById('opt-d').value,
                 correct_option: document.getElementById('correct-opt').value
             };
+
+            // Basic Validation
+            if(!q.question_text || !q.option_a) return alert("Fill in the question fields!");
+
             const { error } = await _supabase.from('questions').insert([q]);
-            if(error) alert("Error adding question");
-            else { 
-                log("Question Added!");
+            
+            if(error) {
+                alert("Error adding question");
+                console.error(error);
+            } else { 
+                log("Question Saved to Database!");
                 // Clear inputs
                 document.getElementById('q-text').value = "";
+                document.getElementById('opt-a').value = "";
+                document.getElementById('opt-b').value = "";
+                document.getElementById('opt-c').value = "";
+                document.getElementById('opt-d').value = "";
+                updateQuestionCount(); // Update the counter
             }
         }
 
         let currentQIndex = 0;
 
         async function setNextQuestion() {
-            // Fetch all questions to find the next one
+            // 1. Get all questions sorted by ID
             const { data: questions } = await _supabase.from('questions').select('*').order('id', { ascending: true });
             
-            // Logic to find next unplayed question could be better, but simple version:
-            // We just pick the next ID based on a local counter or random.
-            // Let's increment ID based on what we see in DB.
+            if (!questions || questions.length === 0) return alert("No questions added yet!");
             
-            if (!questions || questions.length === 0) return alert("No questions in DB!");
-            
-            const nextQ = questions[currentQIndex]; // Simply loops through array
-            if(!nextQ) return alert("End of Quiz!");
+            // 2. Select the next one based on our local index
+            if (currentQIndex >= questions.length) {
+                return alert("No more questions! Game Over.");
+            }
 
-            // Update Game State
+            const nextQ = questions[currentQIndex];
+
+            // 3. Push to Game State
             await _supabase.from('game_state').update({ 
                 status: 'active', 
                 current_question_id: nextQ.id,
                 question_start_time: new Date().toISOString()
             }).eq('id', 1);
 
-            currentQIndex++;
-            log(`Question ${currentQIndex} is Live!`);
+            currentQIndex++; // Prepare for the next click
+            log(`Broadcasting Question ${currentQIndex} of ${questions.length}...`);
         }
 
         async function showLeaderboard() {
             await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
-            log("Leaderboard is visible on user screens.");
+            log("Leaderboard Live!");
         }
 
-        function playMusic(type) {
+        function playMusic() {
             document.getElementById('sound-suspense').play();
         }
-
     </script>
 </body>
 </html>
