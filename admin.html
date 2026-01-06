@@ -65,8 +65,15 @@
     </div>
 
     <audio id="sound-suspense" src="https://www.soundjay.com/misc/sounds/magic-chime-01.mp3"></audio>
+    <script>
+        // config.js
+    const SUPABASE_URL = "https://ndkwlfyqbbkohhccsijm.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ka3dsZnlxYmJrb2hoY2NzaWptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MDc1OTcsImV4cCI6MjA4MzI4MzU5N30.r5vOKPTc65gyoesWuiiT_slt2ldlEX6K0D2bbdS1nZI";
 
-    <script src="config.js"></script>
+    const { createClient } = supabase;
+    const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    </script>
+    
     <script>
         const HOST_PASSWORD = "123"; 
 
