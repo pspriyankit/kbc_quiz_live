@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>KBC Host Admin</title>
+    <title>KBC Host Admin (High Performance)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -14,11 +14,14 @@
         
         <div id="login-panel" class="mb-5">
             <input type="password" id="host-pwd" placeholder="Host Password" class="p-2 text-black rounded">
-            <button onclick="checkPwd()" class="bg-blue-600 px-4 py-2 rounded">Login</button>
+            <button id="login-btn" onclick="checkPwd()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-500 transition">Login</button>
+            <p id="login-status" class="text-sm text-gray-400 mt-2"></p>
         </div>
 
         <div id="admin-panel" class="hidden space-y-6">
             
+            <div id="connection-health" class="text-xs text-right text-green-500 font-mono">🟢 System Online</div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="bg-gray-800 p-4 rounded shadow flex items-center justify-between">
                     <div>
@@ -30,20 +33,21 @@
                     </div>
                 </div>
 
-                <div class="bg-gray-700 p-4 rounded text-center flex flex-col justify-center">
-                    <span class="text-4xl font-bold text-green-400" id="q-count">Loading...</span>
+                <div class="bg-gray-700 p-4 rounded text-center flex flex-col justify-center relative">
+                    <span class="text-4xl font-bold text-green-400" id="q-count">...</span>
                     <p class="text-sm text-gray-300">Questions in Bank</p>
+                    <button onclick="refreshData()" class="absolute top-2 right-2 text-xs bg-gray-600 px-2 py-1 rounded hover:bg-gray-500">🔄 Refresh</button>
                 </div>
             </div>
 
             <div class="bg-gray-800 p-4 rounded shadow grid grid-cols-2 gap-4">
-                <button onclick="resetGame()" class="bg-red-600 hover:bg-red-700 p-4 rounded font-bold">🔁 Reset Game</button>
-                <button id="btn-next" onclick="setNextQuestion()" class="bg-green-600 hover:bg-green-700 p-4 rounded font-bold text-xl">➡️ NEXT Question</button>
-                <button onclick="showLeaderboard()" class="bg-purple-600 hover:bg-purple-700 p-4 rounded font-bold">🏆 Show Leaderboard</button>
-                <button onclick="playMusic()" class="bg-yellow-600 hover:bg-yellow-700 p-4 rounded font-bold">🎵 Sound</button>
+                <button onclick="resetGame()" class="bg-red-600 hover:bg-red-700 p-4 rounded font-bold transition">🔁 Reset Game</button>
+                <button id="btn-next" onclick="setNextQuestion()" class="bg-green-600 hover:bg-green-700 p-4 rounded font-bold text-xl transition">➡️ NEXT Question</button>
+                <button onclick="showLeaderboard()" class="bg-purple-600 hover:bg-purple-700 p-4 rounded font-bold transition">🏆 Show Leaderboard</button>
+                <button onclick="playMusic()" class="bg-yellow-600 hover:bg-yellow-700 p-4 rounded font-bold transition">🎵 Sound</button>
             </div>
 
-            <div id="game-over-msg" class="hidden bg-yellow-600 p-4 rounded text-center font-bold text-2xl border-2 border-yellow-400">
+            <div id="game-over-msg" class="hidden bg-yellow-600 p-4 rounded text-center font-bold text-2xl border-2 border-yellow-400 shadow-lg">
                 🎉 GAME OVER! FINAL RESULTS SENT 🎉
             </div>
 
@@ -68,7 +72,7 @@
                         <option value="C">Answer: C</option>
                         <option value="D">Answer: D</option>
                     </select>
-                    <button onclick="addQuestion()" class="bg-blue-600 hover:bg-blue-500 w-full py-2 rounded font-bold">➕ Save Question</button>
+                    <button onclick="addQuestion()" class="bg-blue-600 hover:bg-blue-500 w-full py-2 rounded font-bold transition">➕ Save Question</button>
                 </div>
 
                 <div class="bg-gray-800 p-4 rounded shadow">
@@ -85,7 +89,6 @@
 
     <script>
         const SUPABASE_URL = "https://ndkwlfyqbbkohhccsijm.supabase.co";
-        
         const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ka3dsZnlxYmJrb2hoY2NzaWptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MDc1OTcsImV4cCI6MjA4MzI4MzU5N30.r5vOKPTc65gyoesWuiiT_slt2ldlEX6K0D2bbdS1nZI"; 
 
         const { createClient } = supabase;
@@ -96,13 +99,39 @@
         const HOST_PASSWORD = "123"; 
         let currentQIndex = 0;
 
-        function checkPwd() {
-            if(document.getElementById('host-pwd').value === HOST_PASSWORD) {
-                document.getElementById('login-panel').classList.add('hidden');
-                document.getElementById('admin-panel').classList.remove('hidden');
-                generateQR();
-                refreshData();
-            } else { alert("Wrong Password"); }
+        async function checkPwd() {
+            const pwdInput = document.getElementById('host-pwd');
+            const status = document.getElementById('login-status');
+            const btn = document.getElementById('login-btn');
+
+            if(pwdInput.value === HOST_PASSWORD) {
+                // UI Feedback
+                status.innerText = "Connecting to database...";
+                status.className = "text-sm text-yellow-400 mt-2";
+                btn.disabled = true;
+                btn.classList.add('opacity-50');
+
+                try {
+                    // Test Connection before showing Admin Panel
+                    const { count, error } = await _supabase.from('questions').select('*', { count: 'exact', head: true });
+                    
+                    if(error) throw error;
+
+                    // Success
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('admin-panel').classList.remove('hidden');
+                    generateQR();
+                    await refreshData();
+                } catch (err) {
+                    console.error(err);
+                    status.innerText = "Connection Failed: " + err.message;
+                    status.className = "text-sm text-red-500 mt-2";
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50');
+                }
+            } else { 
+                alert("Wrong Password"); 
+            }
         }
 
         function generateQR() {
@@ -114,35 +143,52 @@
 
         function log(msg) { document.getElementById('status-log').innerText = msg; }
 
+        // --- OPTIMIZED DATA FETCHING ---
         async function refreshData() {
-            updateQuestionCount();
-            fetchQuestionList();
+            // Run these in parallel for speed
+            await Promise.all([
+                updateQuestionCount(),
+                fetchQuestionList()
+            ]);
         }
 
         async function updateQuestionCount() {
-            const { count } = await _supabase.from('questions').select('*', { count: 'exact', head: true });
-            document.getElementById('q-count').innerText = (count || 0);
+            try {
+                const { count } = await _supabase.from('questions').select('*', { count: 'exact', head: true });
+                document.getElementById('q-count').innerText = (count || 0);
+            } catch (e) {
+                document.getElementById('q-count').innerText = "Err";
+            }
         }
 
         async function fetchQuestionList() {
-            const { data: questions } = await _supabase.from('questions').select('*').order('id', { ascending: true });
             const listContainer = document.getElementById('db-questions-list');
-            listContainer.innerHTML = "";
-            
-            if(questions) {
-                questions.forEach((q, idx) => {
-                    const isActive = (idx === currentQIndex - 1); 
-                    const activeClass = isActive ? "border-2 border-green-500" : "";
-                    listContainer.innerHTML += `
-                        <div class="bg-gray-700 p-3 rounded flex justify-between items-center text-sm ${activeClass}">
-                            <div class="truncate mr-2">
-                                <span class="font-bold text-yellow-400">Q${idx+1}:</span> ${q.question_text}
-                                <br><span class="text-xs text-gray-400">Ans: ${q.correct_option}</span>
+            try {
+                const { data: questions, error } = await _supabase.from('questions').select('*').order('id', { ascending: true });
+                
+                if(error) throw error;
+                
+                listContainer.innerHTML = "";
+                
+                if(questions && questions.length > 0) {
+                    questions.forEach((q, idx) => {
+                        const isActive = (idx === currentQIndex - 1); 
+                        const activeClass = isActive ? "border-2 border-green-500" : "";
+                        listContainer.innerHTML += `
+                            <div class="bg-gray-700 p-3 rounded flex justify-between items-center text-sm ${activeClass}">
+                                <div class="truncate mr-2">
+                                    <span class="font-bold text-yellow-400">Q${idx+1}:</span> ${q.question_text}
+                                    <br><span class="text-xs text-gray-400">Ans: ${q.correct_option}</span>
+                                </div>
+                                <button onclick="deleteQuestion(${q.id})" class="bg-red-900 hover:bg-red-700 text-red-200 px-2 py-1 rounded text-xs">Del</button>
                             </div>
-                            <button onclick="deleteQuestion(${q.id})" class="bg-red-900 hover:bg-red-700 text-red-200 px-2 py-1 rounded text-xs">Del</button>
-                        </div>
-                    `;
-                });
+                        `;
+                    });
+                } else {
+                    listContainer.innerHTML = "<p class='text-gray-500 italic'>No questions yet.</p>";
+                }
+            } catch (e) {
+                listContainer.innerHTML = "<p class='text-red-400'>Error loading list. <button onclick='fetchQuestionList()' class='underline'>Retry</button></p>";
             }
         }
 
@@ -173,47 +219,61 @@
         }
 
         async function resetGame() {
-            if(!confirm("RESET EVERYTHING?")) return;
-            // 1. Clear Players
+            if(!confirm("RESET EVERYTHING? This deletes all scores.")) return;
+            
+            // Delete in batches or use simple deletes
             await _supabase.from('players').delete().neq('score', -1); 
-            // 2. Clear Game State
             await _supabase.from('game_state').update({ status: 'waiting', current_question_id: null }).eq('id', 1);
-            // 3. Clear 'Fastest Player' history from questions so they can be replayed
             await _supabase.from('questions').update({ fastest_player_id: null }).gt('id', 0);
 
             currentQIndex = 0;
             document.getElementById('game-over-msg').classList.add('hidden');
             document.getElementById('btn-next').innerText = "➡️ NEXT Question";
-            log("Game Reset. All history cleared.");
+            log("Game Reset Complete.");
             refreshData();
         }
 
         async function setNextQuestion() {
-            const { data: questions } = await _supabase.from('questions').select('*').order('id', { ascending: true });
+            const btn = document.getElementById('btn-next');
+            btn.disabled = true; // Prevent double click
             
-            if (!questions || questions.length === 0) return alert("No questions!");
+            try {
+                const { data: questions } = await _supabase.from('questions').select('*').order('id', { ascending: true });
+                
+                if (!questions || questions.length === 0) {
+                    alert("No questions!");
+                    btn.disabled = false;
+                    return;
+                }
 
-            if (currentQIndex >= questions.length) {
-                finishGame();
-                return;
+                if (currentQIndex >= questions.length) {
+                    await finishGame();
+                    btn.disabled = false;
+                    return;
+                }
+
+                const nextQ = questions[currentQIndex];
+                
+                await _supabase.from('game_state').update({ 
+                    status: 'active', 
+                    current_question_id: nextQ.id, 
+                    question_start_time: new Date().toISOString()
+                }).eq('id', 1);
+
+                currentQIndex++;
+                
+                const btnText = (currentQIndex === questions.length) ? "🏁 FINISH GAME" : "➡️ NEXT Question";
+                btn.innerText = btnText;
+                
+                log(`Q${currentQIndex} is LIVE!`);
+                document.getElementById('admin-leaderboard-panel').classList.add('hidden');
+                refreshData(); 
+            } catch (err) {
+                alert("Error starting question. Check console.");
+                console.error(err);
+            } finally {
+                btn.disabled = false;
             }
-
-            const nextQ = questions[currentQIndex];
-            
-            await _supabase.from('game_state').update({ 
-                status: 'active', 
-                current_question_id: nextQ.id, 
-                question_start_time: new Date().toISOString()
-            }).eq('id', 1);
-
-            currentQIndex++;
-            
-            const btnText = (currentQIndex === questions.length) ? "🏁 FINISH GAME" : "➡️ NEXT Question";
-            document.getElementById('btn-next').innerText = btnText;
-            
-            log(`Q${currentQIndex} is LIVE!`);
-            document.getElementById('admin-leaderboard-panel').classList.add('hidden');
-            refreshData(); 
         }
 
         async function finishGame() {
@@ -230,7 +290,7 @@
             }
             document.getElementById('admin-leaderboard-panel').classList.remove('hidden');
             
-            // Sort by Score DESC, then Time ASC (for admin view too)
+            // Limit to Top 10 to keep it fast
             const { data: players } = await _supabase.from('players').select('*')
                 .order('score', { ascending: false })
                 .order('last_answer_time', { ascending: true, nullsFirst: false }) 
