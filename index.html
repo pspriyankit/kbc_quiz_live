@@ -62,10 +62,14 @@
         </div>
     </div>
 
-    <div id="screen-leaderboard" class="hidden w-full max-w-md text-center h-full flex flex-col justify-center">
-        <h2 id="lb-title" class="text-3xl font-bold text-yellow-400 mb-6">🏆 LEADERBOARD</h2>
-        <div id="leaderboard-list" class="space-y-3 w-full"></div>
-        <p id="lb-wait-msg" class="mt-8 text-gray-500 text-sm animate-pulse">Waiting for next question...</p>
+    <div id="screen-leaderboard" class="hidden w-full max-w-md text-center h-full flex flex-col pt-10 pb-10">
+    <h2 id="lb-title" class="text-3xl font-bold text-yellow-400 mb-4 shrink-0">🏆 LEADERBOARD</h2>
+    
+    <div id="leaderboard-container" class="flex-1 overflow-y-auto px-2 w-full">
+        <div id="leaderboard-list" class="space-y-3 pb-10"></div>
+    </div>
+
+    <p id="lb-wait-msg" class="mt-4 text-gray-500 text-sm animate-pulse shrink-0">Waiting for next question...</p>
     </div>
 
     <script>
@@ -304,32 +308,41 @@
         }
 
         async function updateLeaderboard(isFinal) {
-            const { data: players } = await _supabase.from('players').select('*')
-                .order('score', { ascending: false })
-                .order('last_answer_time', { ascending: true, nullsFirst: false }) 
-                .limit(5);
+            // 1. INCREASE LIMIT TO 200
+    const { data: players } = await _supabase.from('players').select('*')
+        .order('score', { ascending: false })
+        .order('last_answer_time', { ascending: true, nullsFirst: false }) 
+        .limit(200);
 
-            const list = document.getElementById('leaderboard-list');
-            list.innerHTML = "";
-            players.forEach((p, index) => {
-                let cardClass = "bg-gray-800 border-gray-700";
-                if(isFinal) {
-                    if (index === 0) cardClass = "rank-0 shadow-yellow-500/50";
-                    else if (index === 1) cardClass = "rank-1";
-                    else if (index === 2) cardClass = "rank-2";
-                }
-                const medal = ["🥇","🥈","🥉","4️⃣","5️⃣"][index] || `#${index+1}`;
-                list.innerHTML += `
-                    <div class="${cardClass} border-2 p-3 rounded-lg flex justify-between items-center shadow-lg transition-all duration-500">
-                        <span class="font-bold text-xl flex items-center gap-2">
-                            <span class="text-2xl">${medal}</span> ${p.name}
-                        </span>
-                        <div class="text-right">
-                            <span class="block font-mono text-xl leading-none font-bold">${p.score}</span>
-                        </div>
-                    </div>`;
-            });
-            if(isFinal) list.innerHTML += `<div class="mt-6 text-gray-400 text-sm">Thanks for playing!</div>`;
+    const list = document.getElementById('leaderboard-list');
+    list.innerHTML = "";
+    
+    players.forEach((p, index) => {
+        let cardClass = "bg-gray-800 border-gray-700";
+        if(isFinal) {
+            if (index === 0) cardClass = "rank-0 shadow-yellow-500/50 scale-105 my-2";
+            else if (index === 1) cardClass = "rank-1";
+            else if (index === 2) cardClass = "rank-2";
+        } else {
+             // Highlight MY OWN score in Blue if I am scrolling
+             if (p.id === myId) cardClass = "bg-blue-900 border-blue-500 border-2";
+        }
+
+        const medal = ["🥇","🥈","🥉"][index] || `#${index+1}`;
+
+        list.innerHTML += `
+            <div class="${cardClass} border p-3 rounded-lg flex justify-between items-center shadow-lg transition-all">
+                <span class="font-bold text-lg flex items-center gap-3 text-left">
+                    <span class="text-2xl w-8 text-center">${medal}</span> 
+                    <span class="truncate max-w-[150px]">${p.name}</span>
+                </span>
+                <div class="text-right">
+                    <span class="block font-mono text-xl leading-none font-bold">${p.score}</span>
+                </div>
+            </div>`;
+    });
+    
+    if(isFinal) list.innerHTML += `<div class="mt-6 text-gray-400 text-sm">Thanks for playing!</div>`;
         }
 
         function showScreen(id) {

@@ -286,21 +286,31 @@
 
         async function showLeaderboard() {
             if(document.getElementById('btn-next').innerText !== "✅ Game Ended") {
-                 await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
-            }
-            document.getElementById('admin-leaderboard-panel').classList.remove('hidden');
-            
-            // Limit to Top 10 to keep it fast
-            const { data: players } = await _supabase.from('players').select('*')
-                .order('score', { ascending: false })
-                .order('last_answer_time', { ascending: true, nullsFirst: false }) 
-                .limit(10);
+             await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
+        }
+        document.getElementById('admin-leaderboard-panel').classList.remove('hidden');
+        
+        // 1. INCREASE LIMIT TO 200 (So you see everyone)
+        const { data: players } = await _supabase.from('players').select('*')
+            .order('score', { ascending: false })
+            .order('last_answer_time', { ascending: true, nullsFirst: false }) 
+            .limit(200); 
 
-            const list = document.getElementById('admin-lb-list');
-            list.innerHTML = "";
-            players.forEach((p, i) => {
-                const medal = ["🥇","🥈","🥉"][i] || `#${i+1}`;
-                list.innerHTML += `<div class="flex justify-between border-b border-purple-600 py-2 text-lg"><span>${medal} ${p.name}</span> <span class="font-bold">${p.score}</span></div>`;
+        const list = document.getElementById('admin-lb-list');
+        // 2. MAKE IT SCROLLABLE (CSS class additions)
+        list.className = "space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar"; 
+        list.innerHTML = "";
+        
+        players.forEach((p, i) => {
+            const medal = ["🥇","🥈","🥉"][i] || `#${i+1}`;
+            // Added background color to alternate rows for readability
+            const bgClass = i % 2 === 0 ? "bg-purple-800" : "bg-purple-900";
+            
+            list.innerHTML += `
+                <div class="flex justify-between items-center ${bgClass} p-2 rounded border-b border-purple-600">
+                    <span class="text-lg">${medal} ${p.name}</span> 
+                    <span class="font-bold text-yellow-300">${p.score}</span>
+                </div>`;
             });
         }
 
