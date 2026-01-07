@@ -18,11 +18,7 @@
         .rank-1 { background: linear-gradient(45deg, #E0E0E0, #BDBDBD); border-color: #FFF; color: black; text-shadow: none; }
         .rank-2 { background: linear-gradient(45deg, #CD7F32, #A0522D); border-color: #FFF; color: white; }
 
-        /* User Identity Badge */
-        #user-badge {
-            backdrop-filter: blur(5px);
-            background: rgba(255, 255, 255, 0.1);
-        }
+        #user-badge { backdrop-filter: blur(5px); background: rgba(255, 255, 255, 0.1); }
     </style>
 </head>
 <body class="kbc-gradient text-white h-screen flex flex-col items-center justify-center font-sans overflow-hidden p-4 relative">
@@ -47,9 +43,7 @@
     <div id="screen-question" class="hidden w-full max-w-2xl flex flex-col h-full justify-center">
         <div id="q-status-bar" class="text-right text-yellow-500 font-mono text-sm mb-2">LIVE QUESTION</div>
         
-        <div id="q-text-display" class="bg-blue-900 border-2 border-yellow-500 p-6 rounded-xl text-xl md:text-2xl text-center mb-6 shadow-xl font-bold">
-            Loading...
-        </div>
+        <div id="q-text-display" class="bg-blue-900 border-2 border-yellow-500 p-6 rounded-xl text-xl md:text-2xl text-center mb-6 shadow-xl font-bold">Loading...</div>
         
         <div id="options-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
             <button id="btn-A" onclick="submitAnswer('A')" class="option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-900 flex items-center"><span class="text-yellow-500 font-bold mr-3 text-xl">A:</span> <span id="opt-A"></span></button>
@@ -59,6 +53,13 @@
         </div>
 
         <div id="result-feedback" class="hidden mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2"></div>
+    </div>
+
+    <div id="screen-answered" class="hidden text-center w-full max-w-md">
+        <div class="bg-gray-800 p-6 rounded-xl border-2 border-blue-500">
+            <h2 class="text-xl font-bold text-blue-300">Answer Recorded 🔒</h2>
+            <p class="text-gray-400 mt-2">Please wait for the results.</p>
+        </div>
     </div>
 
     <div id="screen-leaderboard" class="hidden w-full max-w-md text-center h-full flex flex-col justify-center">
@@ -77,9 +78,9 @@
 
     <script>
         let myId = null;
+        let myLastAnsweredQ = 0; // Local tracking of state
         let currentQData = null;
-        let hasAnswered = false;
-        let isSubmitting = false; // Prevent double clicks
+        let isSubmitting = false; 
 
         window.onload = checkExistingSession;
 
@@ -91,16 +92,19 @@
         async function checkExistingSession() {
             const storedId = localStorage.getItem('kbc_player_id');
             if (storedId) {
-                const { data } = await _supabase.from('players').select('id, name').eq('id', storedId).single();
+                // Fetch ID AND 'last_answered_q_id' to restore state
+                const { data } = await _supabase.from('players').select('id, name, last_answered_q_id').eq('id', storedId).single();
                 
                 if (data) {
                     myId = data.id;
+                    myLastAnsweredQ = data.last_answered_q_id || 0; // Restore progress
                     document.getElementById('player-name').value = data.name; 
                     document.getElementById('rejoin-msg').classList.remove('hidden');
                     updateIdentityBadge(data.name);
 
                     showScreen('screen-waiting');
                     listenToGame();
+                    // Fetch state immediately to catch up
                     const { data: state } = await _supabase.from('game_state').select('*').eq('id', 1).single();
                     if(state) handleGameState(state);
                 } else {
@@ -115,14 +119,16 @@
             const name = document.getElementById('player-name').value.trim();
             if(!name) return alert("Name is required");
 
-            const { data: existingUser } = await _supabase.from('players').select('id, name').eq('name', name).single();
+            const { data: existingUser } = await _supabase.from('players').select('id, name, last_answered_q_id').eq('name', name).single();
 
             if (existingUser) {
                 myId = existingUser.id;
+                myLastAnsweredQ = existingUser.last_answered_q_id || 0;
             } else {
                 const { data, error } = await _supabase.from('players').insert([{ name: name }]).select();
                 if(error) return alert("Error joining");
                 myId = data[0].id;
+                myLastAnsweredQ = 0;
             }
 
             localStorage.setItem('kbc_player_id', myId);
@@ -135,94 +141,96 @@
             if(state) handleGameState(state);
         }
 
+        // --- RETRY LOGIC FOR NETWORK ERRORS ---
         async function submitAnswer(selectedOption) {
-            if(hasAnswered || isSubmitting) return; // Stop if already submitted
-            
-            // 1. Lock UI & Show Loading State
+            if(isSubmitting) return;
             isSubmitting = true;
+
             const btn = document.getElementById('btn-' + selectedOption);
             const originalText = document.getElementById('opt-' + selectedOption).innerText;
             
-            // Lock all buttons
+            // Lock UI
             ['A','B','C','D'].forEach(opt => document.getElementById('btn-'+opt).classList.add('opacity-50', 'pointer-events-none'));
-            
-            // Show "Thinking..." feedback
             document.getElementById('opt-' + selectedOption).innerText = "Checking...";
 
-            try {
-                // --- LOGIC START ---
-                const isCorrect = (selectedOption === currentQData.correct_option);
-                const feedbackBox = document.getElementById('result-feedback');
-
-                if (isCorrect) {
-                    // Check if already answered in DB
-                    const { data: player, error: fetchErr } = await _supabase.from('players').select('score, last_answered_q_id').eq('id', myId).single();
-                    if(fetchErr) throw fetchErr; // Throw error to be caught below
-
-                    if (player.last_answered_q_id === currentQData.id) {
-                        feedbackBox.innerHTML = "⚠️ Answer already recorded.";
-                        feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold bg-gray-700 text-white";
-                        feedbackBox.classList.remove('hidden');
-                        hasAnswered = true; 
-                        return; // Stop here
+            // Retry Loop (Try 3 times)
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    await processAnswer(selectedOption);
+                    return; // Success! Exit function
+                } catch (err) {
+                    console.warn(`Attempt ${attempt} failed:`, err);
+                    if (attempt === 3) {
+                        // All 3 failed - Show Error
+                        alert("⚠️ Connection failed. Please try again.");
+                        resetButtons(selectedOption, originalText);
+                        isSubmitting = false;
+                    } else {
+                        // Wait 500ms before retrying
+                        await new Promise(r => setTimeout(r, 500));
                     }
-
-                    // Fastest Finger Logic
-                    const { data: claimData } = await _supabase
-                        .from('questions')
-                        .update({ fastest_player_id: myId })
-                        .eq('id', currentQData.id)
-                        .is('fastest_player_id', null) 
-                        .select();
-
-                    let points = 10;
-                    let msg = "+10 Points";
-                    if (claimData && claimData.length > 0) {
-                        points = 12;
-                        msg = "⚡ FASTEST! +12 Points ⚡";
-                    }
-
-                    btn.classList.add('correct-anim');
-                    feedbackBox.innerHTML = `✅ CORRECT! <br> <span class='text-sm font-bold'>${msg}</span>`;
-                    feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-green-900 border-green-500 text-white";
-                    
-                    const newScore = (player.score || 0) + points;
-                    await _supabase.from('players').update({ 
-                        score: newScore,
-                        last_answer_time: new Date().toISOString(),
-                        last_answered_q_id: currentQData.id 
-                    }).eq('id', myId);
-
-                } else {
-                    // Wrong Answer
-                    await _supabase.from('players').update({ last_answered_q_id: currentQData.id }).eq('id', myId);
-                    
-                    btn.classList.add('wrong-anim');
-                    feedbackBox.innerHTML = `❌ WRONG! <br> <span class='text-sm text-gray-300'>Answer was ${currentQData.correct_option}</span>`;
-                    feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-red-900 border-red-500 text-white";
-                }
-                
-                feedbackBox.classList.remove('hidden');
-                hasAnswered = true; // Mark strictly as done locally
-
-            } catch (err) {
-                // --- ERROR HANDLING (Unfreeze the screen) ---
-                console.error(err);
-                alert("⚠️ Network Error! Please try clicking again.");
-                
-                // UNLOCK Buttons so they can try again
-                ['A','B','C','D'].forEach(opt => document.getElementById('btn-'+opt).classList.remove('opacity-50', 'pointer-events-none'));
-                
-                // Reset Text
-                document.getElementById('opt-' + selectedOption).innerText = originalText;
-                isSubmitting = false; // Allow submitting again
-                
-            } finally {
-                // If success, restore text (visuals are kept by 'hasAnswered' logic or 'correct-anim' class)
-                if(hasAnswered) {
-                    document.getElementById('opt-' + selectedOption).innerText = originalText;
                 }
             }
+        }
+
+        // Logic separated for clean retry handling
+        async function processAnswer(selectedOption) {
+            const isCorrect = (selectedOption === currentQData.correct_option);
+            const feedbackBox = document.getElementById('result-feedback');
+
+            if (isCorrect) {
+                // DB Verification
+                const { data: player } = await _supabase.from('players').select('last_answered_q_id, score').eq('id', myId).single();
+                
+                // CRITICAL FIX: If already answered, don't error, just update UI
+                if (player.last_answered_q_id === currentQData.id) {
+                    myLastAnsweredQ = currentQData.id;
+                    showScreen('screen-answered'); 
+                    return;
+                }
+
+                // Fastest Finger
+                const { data: claimData } = await _supabase
+                    .from('questions')
+                    .update({ fastest_player_id: myId })
+                    .eq('id', currentQData.id)
+                    .is('fastest_player_id', null) 
+                    .select();
+
+                let points = 10;
+                let msg = "+10 Points";
+                if (claimData && claimData.length > 0) { points = 12; msg = "⚡ FASTEST! +12 Points ⚡"; }
+
+                const btn = document.getElementById('btn-' + selectedOption);
+                btn.classList.add('correct-anim');
+                feedbackBox.innerHTML = `✅ CORRECT! <br> <span class='text-sm font-bold'>${msg}</span>`;
+                feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-green-900 border-green-500 text-white";
+                
+                // Commit Score & Lock Question
+                await _supabase.from('players').update({ 
+                    score: (player.score || 0) + points,
+                    last_answer_time: new Date().toISOString(),
+                    last_answered_q_id: currentQData.id 
+                }).eq('id', myId);
+                
+                myLastAnsweredQ = currentQData.id; // Update local state
+
+            } else {
+                // Wrong answer
+                await _supabase.from('players').update({ last_answered_q_id: currentQData.id }).eq('id', myId);
+                myLastAnsweredQ = currentQData.id;
+                
+                const btn = document.getElementById('btn-' + selectedOption);
+                btn.classList.add('wrong-anim');
+                feedbackBox.innerHTML = `❌ WRONG! <br> <span class='text-sm text-gray-300'>Answer was ${currentQData.correct_option}</span>`;
+                feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-red-900 border-red-500 text-white";
+            }
+            feedbackBox.classList.remove('hidden');
+        }
+
+        function resetButtons(selectedOption, text) {
+            ['A','B','C','D'].forEach(opt => document.getElementById('btn-'+opt).classList.remove('opacity-50', 'pointer-events-none'));
+            document.getElementById('opt-' + selectedOption).innerText = text;
         }
 
         function listenToGame() {
@@ -234,12 +242,19 @@
 
         async function handleGameState(state) {
             if (state.status === 'active') {
+                // CHECK: Did I already answer this specific question ID?
+                // This fixes the "Rahul Rejoin" bug
+                if (myLastAnsweredQ === state.current_question_id) {
+                    showScreen('screen-answered');
+                    return;
+                }
+
                 if (currentQData && currentQData.id === state.current_question_id) return;
 
+                // Load New Question
                 const { data: q } = await _supabase.from('questions').select('*').eq('id', state.current_question_id).single();
                 currentQData = q;
-                hasAnswered = false;
-                isSubmitting = false; // Reset lock for new question
+                isSubmitting = false; 
 
                 ['A','B','C','D'].forEach(opt => {
                     document.getElementById('opt-'+opt).innerText = q['option_'+opt.toLowerCase()];
@@ -249,6 +264,7 @@
                 });
                 document.getElementById('q-text-display').innerText = q.question_text;
                 document.getElementById('result-feedback').classList.add('hidden');
+                
                 showScreen('screen-question');
             } 
             else if (state.status === 'leaderboard') {
@@ -276,7 +292,6 @@
 
             const list = document.getElementById('leaderboard-list');
             list.innerHTML = "";
-            
             players.forEach((p, index) => {
                 let cardClass = "bg-gray-800 border-gray-700";
                 if(isFinal) {
@@ -285,7 +300,6 @@
                     else if (index === 2) cardClass = "rank-2";
                 }
                 const medal = ["🥇","🥈","🥉","4️⃣","5️⃣"][index] || `#${index+1}`;
-
                 list.innerHTML += `
                     <div class="${cardClass} border-2 p-3 rounded-lg flex justify-between items-center shadow-lg transition-all duration-500">
                         <span class="font-bold text-xl flex items-center gap-2">
@@ -294,14 +308,13 @@
                         <div class="text-right">
                             <span class="block font-mono text-xl leading-none font-bold">${p.score}</span>
                         </div>
-                    </div>
-                `;
+                    </div>`;
             });
             if(isFinal) list.innerHTML += `<div class="mt-6 text-gray-400 text-sm">Thanks for playing!</div>`;
         }
 
         function showScreen(id) {
-            ['screen-login', 'screen-waiting', 'screen-question', 'screen-leaderboard'].forEach(s => document.getElementById(s).classList.add('hidden'));
+            ['screen-login', 'screen-waiting', 'screen-question', 'screen-answered', 'screen-leaderboard'].forEach(s => document.getElementById(s).classList.add('hidden'));
             document.getElementById(id).classList.remove('hidden');
         }
     </script>
