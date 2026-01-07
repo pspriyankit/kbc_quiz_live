@@ -52,7 +52,7 @@
             <div class="bg-gray-800 p-4 rounded shadow grid grid-cols-2 gap-4">
                 <button onclick="resetGame()" class="bg-red-600 hover:bg-red-700 p-4 rounded font-bold transition">🔁 Reset Game</button>
                 <button id="btn-next" onclick="setNextQuestion()" class="bg-green-600 hover:bg-green-700 p-4 rounded font-bold text-xl transition">➡️ NEXT Question</button>
-                <button onclick="showLeaderboard()" class="bg-purple-600 hover:bg-purple-700 p-4 rounded font-bold transition">🏆 Show Leaderboard</button>
+                <button id="btn-leaderboard" onclick="toggleLeaderboard()" class="bg-purple-600 hover:bg-purple-700 p-4 rounded font-bold transition">🏆 Show Leaderboard</button>
                 <button onclick="playMusic()" class="bg-yellow-600 hover:bg-yellow-700 p-4 rounded font-bold transition">🎵 Sound</button>
             </div>
 
@@ -285,43 +285,78 @@
             }
         }
 
-        async function finishGame() {
-            await _supabase.from('game_state').update({ status: 'finished' }).eq('id', 1);
-            document.getElementById('game-over-msg').classList.remove('hidden');
-            document.getElementById('btn-next').innerText = "✅ Game Ended";
-            log("Game Over. Final Results Sent.");
-            showLeaderboard();
-        }
+        // --- UPDATED GAME END & LEADERBOARD LOGIC ---
 
-        async function showLeaderboard() {
-            if(document.getElementById('btn-next').innerText !== "✅ Game Ended") {
-             await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
+    async function finishGame() {
+        await _supabase.from('game_state').update({ status: 'finished' }).eq('id', 1);
+        
+        document.getElementById('game-over-msg').classList.remove('hidden');
+        document.getElementById('btn-next').innerText = "✅ Game Ended";
+        log("Game Over. Final Results Sent.");
+        
+        // Force open the leaderboard without toggling
+        if (!isLeaderboardActive) {
+            toggleLeaderboard();
         }
-        document.getElementById('admin-leaderboard-panel').classList.remove('hidden');
-        
-        // 1. INCREASE LIMIT TO 200 (So you see everyone)
-        const { data: players } = await _supabase.from('players').select('*')
-            .order('score', { ascending: false })
-            .order('last_answer_time', { ascending: true, nullsFirst: false }) 
-            .limit(200); 
+    }
 
-        const list = document.getElementById('admin-lb-list');
-        // 2. MAKE IT SCROLLABLE (CSS class additions)
-        list.className = "space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar"; 
-        list.innerHTML = "";
+    // New Smart Toggle Function (Replaces showLeaderboard)
+    let isLeaderboardActive = false;
+
+    async function toggleLeaderboard() {
+        const btn = document.getElementById('btn-leaderboard');
+        const lbPanel = document.getElementById('admin-leaderboard-panel');
         
-        players.forEach((p, i) => {
-            const medal = ["🥇","🥈","🥉"][i] || `#${i+1}`;
-            // Added background color to alternate rows for readability
-            const bgClass = i % 2 === 0 ? "bg-purple-800" : "bg-purple-900";
+        // CASE 1: HIDE LEADERBOARD (RESUME GAME)
+        if (isLeaderboardActive) {
+            // If game is ended, don't change status to active, keep it finished
+            if (document.getElementById('btn-next').innerText !== "✅ Game Ended") {
+                const nextStatus = (currentQIndex > 0) ? 'active' : 'waiting';
+                await _supabase.from('game_state').update({ status: nextStatus }).eq('id', 1);
+                log("Game Resumed!");
+            }
             
-            list.innerHTML += `
-                <div class="flex justify-between items-center ${bgClass} p-2 rounded border-b border-purple-600">
-                    <span class="text-lg">${medal} ${p.name}</span> 
-                    <span class="font-bold text-yellow-300">${p.score}</span>
-                </div>`;
+            lbPanel.classList.add('hidden');
+            btn.innerText = "🏆 Show Leaderboard";
+            btn.classList.replace('bg-gray-600', 'bg-purple-600');
+            isLeaderboardActive = false;
+        } 
+        
+        // CASE 2: SHOW LEADERBOARD (PAUSE GAME)
+        else {
+            // Only update status if game isn't already finished
+            if (document.getElementById('btn-next').innerText !== "✅ Game Ended") {
+                await _supabase.from('game_state').update({ status: 'leaderboard' }).eq('id', 1);
+            }
+            
+            lbPanel.classList.remove('hidden');
+            
+            // FETCH & RENDER (Top 200)
+            const { data: players } = await _supabase.from('players').select('*')
+                .order('score', { ascending: false })
+                .order('last_answer_time', { ascending: true, nullsFirst: false }) 
+                .limit(200);
+            
+            const list = document.getElementById('admin-lb-list');
+            list.className = "space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar";
+            list.innerHTML = "";
+            
+            players.forEach((p, i) => {
+                const medal = ["🥇","🥈","🥉"][i] || `#${i+1}`;
+                const bgClass = i % 2 === 0 ? "bg-purple-800" : "bg-purple-900";
+                list.innerHTML += `
+                    <div class="flex justify-between items-center ${bgClass} p-2 rounded border-b border-purple-600">
+                        <span class="text-lg">${medal} ${p.name}</span> 
+                        <span class="font-bold text-yellow-300">${p.score}</span>
+                    </div>`;
             });
+
+            btn.innerText = "❌ Hide & Resume";
+            btn.classList.replace('bg-purple-600', 'bg-gray-600');
+            isLeaderboardActive = true;
+            log("Leaderboard is LIVE.");
         }
+    }
 
         function playMusic() { document.getElementById('sound-suspense').play(); }
 
