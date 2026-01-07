@@ -38,7 +38,9 @@ async function runTest() {
                 
                 // Only react if status changes to 'active'
                 if (state.status === 'active') {
-                    console.log(`\n🔔 Question ${state.current_question_id} is LIVE! Bots answering...`);
+                    // Fetch question text first to be sure
+                    const { data: qVal } = await supabase.from('questions').select('question_text').eq('id', state.current_question_id).single();
+                    console.log(`\n🔔 LIVE QUESTION: "${qVal.question_text}" (ID: ${state.current_question_id})`);
                     
                     // Fetch Question Details (to know the answer)
                     const { data: q } = await supabase.from('questions').select('*').eq('id', state.current_question_id).single();
