@@ -69,7 +69,6 @@
 
     <script>
         const SUPABASE_URL = "https://ndkwlfyqbbkohhccsijm.supabase.co";
-       
         const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ka3dsZnlxYmJrb2hoY2NzaWptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MDc1OTcsImV4cCI6MjA4MzI4MzU5N30.r5vOKPTc65gyoesWuiiT_slt2ldlEX6K0D2bbdS1nZI"; 
 
         const { createClient } = supabase;
@@ -80,8 +79,8 @@
         let myId = null;
         let currentQData = null;
         let hasAnswered = false;
+        let isSubmitting = false; // Prevent double clicks
 
-        // Auto-login on load
         window.onload = checkExistingSession;
 
         function updateIdentityBadge(name) {
@@ -98,8 +97,6 @@
                     myId = data.id;
                     document.getElementById('player-name').value = data.name; 
                     document.getElementById('rejoin-msg').classList.remove('hidden');
-                    
-                    // Show Identity Badge
                     updateIdentityBadge(data.name);
 
                     showScreen('screen-waiting');
@@ -118,7 +115,6 @@
             const name = document.getElementById('player-name').value.trim();
             if(!name) return alert("Name is required");
 
-            // Smart Join (Recover or Create)
             const { data: existingUser } = await _supabase.from('players').select('id, name').eq('name', name).single();
 
             if (existingUser) {
@@ -140,65 +136,93 @@
         }
 
         async function submitAnswer(selectedOption) {
-            if(hasAnswered) return;
-            hasAnswered = true;
-
-            const isCorrect = (selectedOption === currentQData.correct_option);
-            const feedbackBox = document.getElementById('result-feedback');
+            if(hasAnswered || isSubmitting) return; // Stop if already submitted
+            
+            // 1. Lock UI & Show Loading State
+            isSubmitting = true;
             const btn = document.getElementById('btn-' + selectedOption);
-
+            const originalText = document.getElementById('opt-' + selectedOption).innerText;
+            
+            // Lock all buttons
             ['A','B','C','D'].forEach(opt => document.getElementById('btn-'+opt).classList.add('opacity-50', 'pointer-events-none'));
+            
+            // Show "Thinking..." feedback
+            document.getElementById('opt-' + selectedOption).innerText = "Checking...";
 
-            if (isCorrect) {
-                // --- DOUBLE POINTS PROTECTION ---
-                // Fetch player's last answered question ID to verify
-                const { data: player } = await _supabase.from('players').select('score, last_answered_q_id').eq('id', myId).single();
-                
-                // If this session has already answered this specific Question ID, BLOCK IT.
-                if (player.last_answered_q_id === currentQData.id) {
-                    feedbackBox.innerHTML = "⚠️ Answer already recorded.";
-                    feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold bg-gray-700 text-white";
-                    feedbackBox.classList.remove('hidden');
-                    return;
+            try {
+                // --- LOGIC START ---
+                const isCorrect = (selectedOption === currentQData.correct_option);
+                const feedbackBox = document.getElementById('result-feedback');
+
+                if (isCorrect) {
+                    // Check if already answered in DB
+                    const { data: player, error: fetchErr } = await _supabase.from('players').select('score, last_answered_q_id').eq('id', myId).single();
+                    if(fetchErr) throw fetchErr; // Throw error to be caught below
+
+                    if (player.last_answered_q_id === currentQData.id) {
+                        feedbackBox.innerHTML = "⚠️ Answer already recorded.";
+                        feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold bg-gray-700 text-white";
+                        feedbackBox.classList.remove('hidden');
+                        hasAnswered = true; 
+                        return; // Stop here
+                    }
+
+                    // Fastest Finger Logic
+                    const { data: claimData } = await _supabase
+                        .from('questions')
+                        .update({ fastest_player_id: myId })
+                        .eq('id', currentQData.id)
+                        .is('fastest_player_id', null) 
+                        .select();
+
+                    let points = 10;
+                    let msg = "+10 Points";
+                    if (claimData && claimData.length > 0) {
+                        points = 12;
+                        msg = "⚡ FASTEST! +12 Points ⚡";
+                    }
+
+                    btn.classList.add('correct-anim');
+                    feedbackBox.innerHTML = `✅ CORRECT! <br> <span class='text-sm font-bold'>${msg}</span>`;
+                    feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-green-900 border-green-500 text-white";
+                    
+                    const newScore = (player.score || 0) + points;
+                    await _supabase.from('players').update({ 
+                        score: newScore,
+                        last_answer_time: new Date().toISOString(),
+                        last_answered_q_id: currentQData.id 
+                    }).eq('id', myId);
+
+                } else {
+                    // Wrong Answer
+                    await _supabase.from('players').update({ last_answered_q_id: currentQData.id }).eq('id', myId);
+                    
+                    btn.classList.add('wrong-anim');
+                    feedbackBox.innerHTML = `❌ WRONG! <br> <span class='text-sm text-gray-300'>Answer was ${currentQData.correct_option}</span>`;
+                    feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-red-900 border-red-500 text-white";
                 }
+                
+                feedbackBox.classList.remove('hidden');
+                hasAnswered = true; // Mark strictly as done locally
 
-                // --- FASTEST FINGER LOGIC ---
-                // Try to be the first to claim 'fastest_player_id' for this question
-                const { data: claimData } = await _supabase
-                    .from('questions')
-                    .update({ fastest_player_id: myId })
-                    .eq('id', currentQData.id)
-                    .is('fastest_player_id', null) 
-                    .select();
-
-                let points = 10;
-                let msg = "+10 Points";
-                if (claimData && claimData.length > 0) {
-                    points = 12;
-                    msg = "⚡ FASTEST! +12 Points ⚡";
+            } catch (err) {
+                // --- ERROR HANDLING (Unfreeze the screen) ---
+                console.error(err);
+                alert("⚠️ Network Error! Please try clicking again.");
+                
+                // UNLOCK Buttons so they can try again
+                ['A','B','C','D'].forEach(opt => document.getElementById('btn-'+opt).classList.remove('opacity-50', 'pointer-events-none'));
+                
+                // Reset Text
+                document.getElementById('opt-' + selectedOption).innerText = originalText;
+                isSubmitting = false; // Allow submitting again
+                
+            } finally {
+                // If success, restore text (visuals are kept by 'hasAnswered' logic or 'correct-anim' class)
+                if(hasAnswered) {
+                    document.getElementById('opt-' + selectedOption).innerText = originalText;
                 }
-
-                btn.classList.add('correct-anim');
-                feedbackBox.innerHTML = `✅ CORRECT! <br> <span class='text-sm font-bold'>${msg}</span>`;
-                feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-green-900 border-green-500 text-white";
-                
-                // Update Score + MARK QUESTION AS ANSWERED
-                const newScore = (player.score || 0) + points;
-                await _supabase.from('players').update({ 
-                    score: newScore,
-                    last_answer_time: new Date().toISOString(),
-                    last_answered_q_id: currentQData.id  // <--- This lock prevents double points
-                }).eq('id', myId);
-
-            } else {
-                // Mark wrong answer as 'answered' too, to prevent retries
-                await _supabase.from('players').update({ last_answered_q_id: currentQData.id }).eq('id', myId);
-                
-                btn.classList.add('wrong-anim');
-                feedbackBox.innerHTML = `❌ WRONG! <br> <span class='text-sm text-gray-300'>Answer was ${currentQData.correct_option}</span>`;
-                feedbackBox.className = "mt-6 text-center p-4 rounded-lg font-bold text-2xl border-2 bg-red-900 border-red-500 text-white";
             }
-            feedbackBox.classList.remove('hidden');
         }
 
         function listenToGame() {
@@ -215,12 +239,13 @@
                 const { data: q } = await _supabase.from('questions').select('*').eq('id', state.current_question_id).single();
                 currentQData = q;
                 hasAnswered = false;
+                isSubmitting = false; // Reset lock for new question
 
                 ['A','B','C','D'].forEach(opt => {
                     document.getElementById('opt-'+opt).innerText = q['option_'+opt.toLowerCase()];
                     const btn = document.getElementById('btn-'+opt);
                     btn.className = "option-btn bg-gray-800 border-2 border-gray-600 p-4 rounded-lg hover:bg-blue-900 flex items-center";
-                    btn.classList.remove('opacity-50', 'pointer-events-none'); 
+                    btn.classList.remove('opacity-50', 'pointer-events-none', 'correct-anim', 'wrong-anim'); 
                 });
                 document.getElementById('q-text-display').innerText = q.question_text;
                 document.getElementById('result-feedback').classList.add('hidden');
