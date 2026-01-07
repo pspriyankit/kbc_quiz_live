@@ -8,6 +8,15 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body class="bg-gray-900 text-white p-5 font-sans">
+    <div id="qr-modal" onclick="closeFullscreenQR()" class="hidden fixed inset-0 z-50 bg-black flex flex-col items-center justify-center cursor-pointer">
+    <h1 class="text-5xl font-bold text-yellow-400 mb-10 animate-pulse">📲 Scan to Join!</h1>
+    
+    <div class="bg-white p-6 rounded-2xl shadow-[0_0_50px_rgba(255,255,0,0.5)]">
+        <div id="qrcode-large"></div>
+    </div>
+    
+    <p class="text-gray-400 mt-10 text-xl">Click anywhere to close</p>
+    </div>
 
     <div class="max-w-4xl mx-auto">
         <h1 class="text-3xl font-bold text-yellow-400 mb-5">🎓 KBC Host Control (Pro)</h1>
@@ -28,8 +37,8 @@
                         <h2 class="text-xl mb-2">Invite Players</h2>
                         <p id="player-link-text" class="text-xs text-blue-300 mt-2 break-all"></p>
                     </div>
-                    <div class="bg-white p-2 rounded">
-                        <div id="qrcode"></div>
+                    <div class="bg-white p-2 rounded cursor-pointer hover:scale-105 transition duration-300" onclick="showFullscreenQR()" title="Click to Fullscreen">
+                    <div id="qrcode"></div>
                     </div>
                 </div>
 
@@ -315,6 +324,27 @@
         }
 
         function playMusic() { document.getElementById('sound-suspense').play(); }
+
+        // --- FULLSCREEN QR LOGIC ---
+
+        function showFullscreenQR() {
+        const modal = document.getElementById('qr-modal');
+        const largeContainer = document.getElementById('qrcode-large');
+        
+        // Get the URL we are already using
+        const url = document.getElementById("player-link-text").innerText;
+        
+        // Clear any old QR and make a BIG one (400x400)
+        largeContainer.innerHTML = "";
+        new QRCode(largeContainer, { text: url, width: 450, height: 450 });
+        
+        // Show Modal
+        modal.classList.remove('hidden');
+        }
+
+        function closeFullscreenQR() {
+        document.getElementById('qr-modal').classList.add('hidden');
+        }
     </script>
 </body>
 </html>
